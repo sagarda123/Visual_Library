@@ -93,23 +93,29 @@ export function openIconUpload({ onDone, toast }) {
   };
 
   saveBtn.onclick = async () => {
+    if (saveBtn.disabled) return;         // guard against double-submit
+    saveBtn.disabled = true;
     let added = 0;
-    for (const p of picked) {
-      if (!p.name) continue;
-      const svg = await p.file.text();
-      // Basic sanity: must parse as an <svg> root; strips nothing else since
-      // icons render inline exactly like manifest icons do.
-      if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(svg)) {
-        toast?.(`${p.file.name}: not a valid SVG`, 'err');
-        continue;
+    try {
+      for (const p of picked) {
+        if (!p.name) continue;
+        const svg = await p.file.text();
+        // Basic sanity: must parse as an <svg> root; strips nothing else since
+        // icons render inline exactly like manifest icons do.
+        if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(svg)) {
+          toast?.(`${p.file.name}: not a valid SVG`, 'err');
+          continue;
+        }
+        await addVisualAsset('icon', {
+          id: `uicon-${generateId()}`,
+          name: p.name,
+          svg,
+          uploadedAt: new Date().toISOString(),
+        });
+        added += 1;
       }
-      await addVisualAsset('icon', {
-        id: `uicon-${generateId()}`,
-        name: p.name,
-        svg,
-        uploadedAt: new Date().toISOString(),
-      });
-      added += 1;
+    } finally {
+      saveBtn.disabled = false;
     }
     if (added) {
       toast?.(`${added} icon${added === 1 ? '' : 's'} added`);
@@ -134,20 +140,29 @@ export function openIllustrationUpload({ onDone, toast }) {
     root.querySelector('#gvl-illu-hint').innerHTML = nameEl.value.trim()
       ? nameHint('illustration', nameEl.value.trim()) : '';
   };
-  root.querySelector('#gvl-illu-save').onclick = async () => {
+  const illuSaveBtn = root.querySelector('#gvl-illu-save');
+  illuSaveBtn.onclick = async () => {
+    if (illuSaveBtn.disabled) return;      // guard against double-submit
     const name = nameEl.value.trim();
     const light = root.querySelector('#gvl-illu-light').files[0];
     const dark = root.querySelector('#gvl-illu-dark').files[0];
     if (!name || !light || !dark) { toast?.('Name, light and dark files are all required', 'err'); return; }
-    await addVisualAsset('illustration', {
-      id: `uillu-${generateId()}`,
-      name,
-      lightBlob: light,
-      darkBlob: dark,
-      lightType: light.type,
-      darkType: dark.type,
-      uploadedAt: new Date().toISOString(),
-    });
+    illuSaveBtn.disabled = true;
+    try {
+      await addVisualAsset('illustration', {
+        id: `uillu-${generateId()}`,
+        name,
+        lightBlob: light,
+        darkBlob: dark,
+        lightType: light.type,
+        darkType: dark.type,
+        uploadedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      illuSaveBtn.disabled = false;
+      toast?.('Could not save illustration', 'err');
+      return;
+    }
     toast?.('Illustration added');
     close();
     onDone?.();

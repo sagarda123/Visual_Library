@@ -456,6 +456,9 @@ function syncViewerHash(id) {
   history.replaceState(null, '', id ? `${base}${ANIMATION_HASH_PREFIX}${encodeURIComponent(id)}` : base);
 }
 export async function openAnimationById(id) {
+  // Already showing this one (e.g. a hashchange that matches the current
+  // viewer) — don't rebuild the Rive instance and restart playback.
+  if (viewer.open && viewer.anim?.id === id) return true;
   await storeInitPromise;
   const anim = store.items.find((a) => a.id === id);
   if (!anim) { toast('Animation not found', 'err'); syncViewerHash(null); return false; }

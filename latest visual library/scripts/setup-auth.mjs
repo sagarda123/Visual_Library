@@ -36,7 +36,8 @@ try {
 }
 
 const salt = crypto.randomBytes(16).toString('hex');
-const passwordHash = crypto.scryptSync(password, Buffer.from(salt, 'hex'), 32).toString('hex');
+// Explicit params — must match server.mjs and api/_auth.mjs.
+const passwordHash = crypto.scryptSync(password, Buffer.from(salt, 'hex'), 32, { N: 16384, r: 8, p: 1, maxmem: 32 * 1024 * 1024 }).toString('hex');
 const hmacSecret = crypto.randomBytes(32).toString('hex');
 
 fs.writeFileSync(OUT, JSON.stringify({ username, salt, passwordHash, hmacSecret }, null, 2), { mode: 0o600 });

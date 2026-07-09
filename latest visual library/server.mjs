@@ -44,8 +44,11 @@ if (!authConfig) {
   console.warn('auth.config.json missing/invalid — /api/login disabled. Run: node scripts/setup-auth.mjs');
 }
 
+// Explicit scrypt cost params so hashes stay verifiable if Node's defaults
+// ever change. Must match api/_auth.mjs and scripts/setup-auth.mjs.
+const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 32 * 1024 * 1024 };
 function scryptHash(password, saltHex) {
-  return crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), 32).toString('hex');
+  return crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), 32, SCRYPT).toString('hex');
 }
 function safeEqual(aHex, bHex) {
   const a = Buffer.from(aHex, 'hex');
@@ -76,7 +79,7 @@ function verifySession(cookieHeader) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (typeof data.exp !== 'number' || data.exp < Date.now()) return null;
+    if (typeof data.exp !== 'number' || data.exp <= Date.now()) return null;
     return { user: data.u };
   } catch (_) { return null; }
 }
@@ -138,13 +141,26 @@ async function handleApi(req, res, url) {
 }
 
 /* ── static files ────────────────────────────────────────────── */
+// Never serve these, whatever the path/casing. Matched case-insensitively
+// because the filesystem (APFS) is case-insensitive: without this, a request
+// for /AUTH.CONFIG.JSON resolves to the real file and leaks credentials.
+const DENY_BASENAMES = new Set(['auth.config.json']);
+const DENY_DIRS = ['scripts', 'api', 'node_modules', '.git'];
+
 function serveStatic(req, res, url) {
   let urlPath;
   try { urlPath = decodeURIComponent(url.pathname); } catch (_) { res.writeHead(400).end('Bad request'); return; }
   if (urlPath.endsWith('/')) urlPath += 'index.html';
   const filePath = path.normalize(path.join(ROOT, urlPath));
-  // Confine to ROOT and never serve the auth config.
-  if ((filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) || path.basename(filePath) === 'auth.config.json') {
+  const rel = path.relative(ROOT, filePath);
+  const topDir = rel.split(path.sep)[0]?.toLowerCase();
+  // Confine to ROOT, block the auth config (any casing), and never expose
+  // server-side tooling directories.
+  if (
+    (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) ||
+    DENY_BASENAMES.has(path.basename(filePath).toLowerCase()) ||
+    DENY_DIRS.includes(topDir)
+  ) {
     res.writeHead(403).end('Forbidden');
     return;
   }

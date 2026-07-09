@@ -48,8 +48,15 @@ export async function login(username, password) {
 }
 
 export async function logout() {
-  try { await fetch('/api/logout', { method: 'POST' }); } catch (_) {}
-  sessionCache = Promise.resolve({ available: true, user: null });
+  // Only clear the cached session once the server confirms the cookie is gone —
+  // otherwise the UI shows "logged out" while the session is still valid.
+  try {
+    const r = await fetch('/api/logout', { method: 'POST' });
+    if (r.ok) sessionCache = Promise.resolve({ available: true, user: null });
+    else sessionCache = getSession(true);
+  } catch (_) {
+    sessionCache = getSession(true);
+  }
   notify();
 }
 

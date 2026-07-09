@@ -632,9 +632,15 @@
     renderIllustrations();
   }
 
+  let refreshingUploads = false;
+  let refreshQueued = false;
   async function refreshUploadedAssets() {
     const ups = window.GVLUploads;
     if (!ups) return;
+    // Serialize: a second call while one is in flight would revoke blob URLs
+    // the first is still wiring up. Coalesce into a single trailing re-run.
+    if (refreshingUploads) { refreshQueued = true; return; }
+    refreshingUploads = true;
     try {
       const [icRecs, ilRecs] = await Promise.all([ups.getUploadedIcons(), ups.getUploadedIllustrations()]);
       uploadedIconEntries = icRecs.map(r => ({
@@ -643,7 +649,7 @@
         rounded:  { svg: r.svg, className: '', unicode: { hex: '' } },
         standard: { svg: r.svg, className: '', unicode: { hex: '' } },
       }));
-      uploadedIllus.forEach(u => { try { URL.revokeObjectURL(u.light); URL.revokeObjectURL(u.dark); } catch (_) {} });
+      const staleBlobs = uploadedIllus.flatMap(u => [u.light, u.dark]);
       uploadedIllus = ilRecs.map(r => ({
         name: r.name, category: 'hero', tags: ['uploaded'], uploaded: true, _uid: r.id,
         light: URL.createObjectURL(r.lightBlob), dark: URL.createObjectURL(r.darkBlob),
@@ -652,7 +658,14 @@
       buildFilters(); applyFilters();
       rebuildIllustrations();
       updateCounter(); updateSearchPlaceholder();
+      // Revoke old URLs only after the new grid has been painted, so an
+      // in-view <img> is never pointed at a revoked URL mid-render.
+      requestAnimationFrame(() => staleBlobs.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} }));
     } catch (e) { console.warn('Uploaded-assets load failed:', e); }
+    finally {
+      refreshingUploads = false;
+      if (refreshQueued) { refreshQueued = false; refreshUploadedAssets(); }
+    }
   }
 
   // ES modules (auth/uploads) execute after this classic script — hook load.
@@ -1548,6 +1561,10 @@
     toast('Building zip…');
     const zip = new JSZip();
     const chosen = icons.filter(i => selected.has(i.name));
+    // Uploaded icons are SVG-only (no font glyph / class); keep them in the
+    // SVG export but exclude from font-derived manifest.json so it isn't
+    // populated with empty classNames/unicodes.
+    const fontIcons = chosen.filter(i => !i.uploaded);
 
     if (kind === 'svg' || kind === 'all') {
       const r = zip.folder('svg/rounded');
@@ -1559,8 +1576,8 @@
         generatedAt: new Date().toISOString(),
         fontFamilies: manifest.fontFamilies,
         classNamePrefixes: manifest.classNamePrefixes,
-        total: chosen.length,
-        icons: chosen,
+        total: fontIcons.length,
+        icons: fontIcons,
       };
       zip.file('manifest.json', JSON.stringify(subset, null, 2));
     }

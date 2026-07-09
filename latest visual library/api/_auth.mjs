@@ -21,11 +21,15 @@ export function authConfig() {
   return { username: AUTH_USERNAME, salt: AUTH_SALT, passwordHash: AUTH_PASSWORD_HASH, hmacSecret: AUTH_HMAC_SECRET };
 }
 
+// Must match server.mjs and scripts/setup-auth.mjs so a hash made by one
+// verifies under the others.
+const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 32 * 1024 * 1024 };
+
 export function verifyCredentials(cfg, username, password) {
   if (typeof username !== 'string' || typeof password !== 'string') return false;
   const pad = (s) => Buffer.from(String(s).padEnd(256).slice(0, 256));
   const okUser = crypto.timingSafeEqual(pad(username), pad(cfg.username));
-  const hash = crypto.scryptSync(password, Buffer.from(cfg.salt, 'hex'), 32);
+  const hash = crypto.scryptSync(password, Buffer.from(cfg.salt, 'hex'), 32, SCRYPT);
   const expected = Buffer.from(cfg.passwordHash, 'hex');
   const okPass = hash.length === expected.length && crypto.timingSafeEqual(hash, expected);
   return okUser && okPass;
@@ -52,7 +56,7 @@ export function verifySession(cfg, cookieHeader) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (typeof data.exp !== 'number' || data.exp < Date.now()) return null;
+    if (typeof data.exp !== 'number' || data.exp <= Date.now()) return null;
     return { user: data.u };
   } catch (_) { return null; }
 }
